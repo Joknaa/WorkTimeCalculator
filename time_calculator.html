@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Work Time Calculator</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #1a1b1f;
+      color: #ddd;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px;
+    }
+    textarea {
+      width: 90%;
+      max-width: 700px;
+      height: 250px;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 14px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background: #4e8cff;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover { background: #3a6fd9; }
+    .output {
+      margin-top: 30px;
+      width: 90%;
+      max-width: 700px;
+      background: #222;
+      border-radius: 10px;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .highlight-green { color: #4effa1; font-weight: bold; }
+    .highlight-red { color: #ff5c5c; font-weight: bold; }
+    .highlight-yellow { color: #ffd65c; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h2>🧮 Work Time Calculator</h2>
+  <textarea id="input" placeholder="Paste your log here..."></textarea>
+  <button onclick="calculate()">Calculate</button>
+  <div class="output" id="output"></div>
+
+  <script>
+    function parseTime(str) {
+      const match = str.match(/(\d{1,2}):(\d{2})/);
+      if (!match) return null;
+      const h = parseInt(match[1]);
+      const m = parseInt(match[2]);
+      return h * 60 + m;
+    }
+
+    function formatDuration(mins) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${h}h ${m.toString().padStart(2, "0")}min`;
+    }
+
+    function calculate() {
+      const input = document.getElementById("input").value;
+      const lines = input.split(/\r?\n/);
+
+      const checkins = [];
+      const checkouts = [];
+      for (let line of lines) {
+        const lower = line.toLowerCase();
+        if (lower.startsWith("check-in") || lower.startsWith("checkin") || lower.startsWith("check in")) {
+          const t = parseTime(line);
+          if (t !== null) checkins.push(t);
+        }
+        if (lower.startsWith("check-out") || lower.startsWith("checkout") || lower.startsWith("check out")) {
+          const t = parseTime(line);
+          if (t !== null) checkouts.push(t);
+        }
+      }
+
+      let html = "<h3>Summary</h3>";
+      let total = 0;
+      const pairs = Math.min(checkins.length, checkouts.length);
+
+      for (let i = 0; i < pairs; i++) {
+        const duration = checkouts[i] - checkins[i];
+        total += duration;
+        html += `Check-in: ${formatTime(checkins[i])} <br>
+                 Check-out: ${formatTime(checkouts[i])} → <span class='highlight-yellow'>(${formatDuration(duration)})</span><br><br>`;
+      }
+
+      if (checkins.length > checkouts.length) {
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const duration = currentMinutes - checkins[checkins.length - 1];
+        html += `🕒 Current session since ${formatTime(checkins[checkins.length - 1])} → 
+                 <span class='highlight-yellow'>(${formatDuration(duration)})</span><br><br>`;
+        total += duration;
+      }
+
+      html += `<hr>`;
+      html += `✅ Total Worked: <span class='highlight-green'>${formatDuration(total)}</span><br>`;
+
+      if (total < 480) {
+        const remaining = 480 - total;
+        const endTime = new Date();
+        endTime.setMinutes(endTime.getMinutes() + remaining);
+        const reach8h = `${endTime.getHours().toString().padStart(2, "0")}:${endTime
+          .getMinutes()
+          .toString()
+          .padStart(2, "0")}`;
+        html += `🔴 Remaining: <span class='highlight-red'>${formatDuration(remaining)}</span><br>`;
+        html += `➡️ You’ll reach 8h at: <span class='highlight-yellow'>${reach8h}</span>`;
+      } else {
+        html += `🎉 You’ve completed your 8h target!`;
+      }
+
+      document.getElementById("output").innerHTML = html;
+    }
+
+    function formatTime(mins) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+    }
+  </script>
+</body>
+</html>
