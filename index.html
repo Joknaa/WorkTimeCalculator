@@ -14,17 +14,20 @@
       align-items: center;
       padding: 40px;
     }
+
     textarea {
       width: 90%;
-      max-width: 700px;
-      height: 250px;
+      max-width: 800px;
+      height: 280px;
       background: #222;
       color: #eee;
       border: 1px solid #444;
       border-radius: 10px;
       padding: 10px;
       font-size: 14px;
+      resize: vertical;
     }
+
     button {
       margin-top: 10px;
       padding: 10px 20px;
@@ -35,104 +38,260 @@
       font-size: 16px;
       cursor: pointer;
     }
+
     button:hover { background: #3a6fd9; }
+
     .output {
       margin-top: 30px;
       width: 90%;
-      max-width: 700px;
+      max-width: 800px;
+    }
+
+    .day-card {
       background: #222;
       border-radius: 10px;
       padding: 20px;
+      margin-bottom: 18px;
       line-height: 1.6;
+      border: 1px solid #333;
     }
+
+    .day-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 12px;
+      color: #ffffff;
+    }
+
+    .session {
+      margin-bottom: 10px;
+    }
+
     .highlight-green { color: #4effa1; font-weight: bold; }
     .highlight-red { color: #ff5c5c; font-weight: bold; }
     .highlight-yellow { color: #ffd65c; font-weight: bold; }
+    .muted { color: #aaa; }
   </style>
 </head>
 <body>
   <h2>🧮 Work Time Calculator</h2>
-  <textarea id="input" placeholder="Paste your log here..."></textarea>
+
+  <textarea id="input" placeholder="Paste your logs here..."></textarea>
   <button onclick="calculate()">Calculate</button>
+
   <div class="output" id="output"></div>
 
   <script>
-    function parseTime(str) {
-      const match = str.match(/(\d{1,2}):(\d{2})/);
+    const TARGET_MINUTES = 8 * 60;
+
+    function cleanLine(line) {
+      line = line.trim();
+
+      // Removes Discord/export prefix:
+      // [8:52 AM]Oknaa [MSGD], : Check-in: 08:30
+      // Oknaa [MSGD], : ---------------- Fri, May 08, 2026 -----------------
+      return line.replace(/^.*?,\s*:\s*/, "").trim();
+    }
+
+    function parseTimeFromLine(line) {
+      const match = line.match(/(\d{1,2}):(\d{2})/);
       if (!match) return null;
-      const h = parseInt(match[1]);
-      const m = parseInt(match[2]);
+
+      const h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+
+      if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+
       return h * 60 + m;
     }
 
+    function formatTime(mins) {
+      const h = Math.floor(mins / 60) % 24;
+      const m = mins % 60;
+
+      return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+    }
+
     function formatDuration(mins) {
+      if (mins < 0) mins = 0;
+
       const h = Math.floor(mins / 60);
       const m = mins % 60;
+
       return `${h}h ${m.toString().padStart(2, "0")}min`;
+    }
+
+    function nowInMinutes() {
+      const now = new Date();
+      return now.getHours() * 60 + now.getMinutes();
+    }
+
+    function getDayTitle(line) {
+      const match = line.match(/-+\s*(.*?)\s*-+/);
+      return match ? match[1].trim() : null;
+    }
+
+    function isCheckIn(line) {
+      return /^(check-in|checkin|check in)\s*:/i.test(line);
+    }
+
+    function isCheckOut(line) {
+      return /^(check-out|checkout|check out)\s*:/i.test(line);
     }
 
     function calculate() {
       const input = document.getElementById("input").value;
-      const lines = input.split(/\r?\n/);
+      const rawLines = input.split(/\r?\n/);
 
-      const checkins = [];
-      const checkouts = [];
-      for (let line of lines) {
-        const lower = line.toLowerCase();
-        if (lower.startsWith("check-in") || lower.startsWith("checkin") || lower.startsWith("check in")) {
-          const t = parseTime(line);
-          if (t !== null) checkins.push(t);
+      const days = [];
+      let currentDay = null;
+
+      for (const rawLine of rawLines) {
+        const line = cleanLine(rawLine);
+        if (!line) continue;
+
+        const dayTitle = getDayTitle(line);
+
+        if (dayTitle) {
+          currentDay = {
+            title: dayTitle,
+            events: []
+          };
+
+          days.push(currentDay);
+          continue;
         }
-        if (lower.startsWith("check-out") || lower.startsWith("checkout") || lower.startsWith("check out")) {
-          const t = parseTime(line);
-          if (t !== null) checkouts.push(t);
+
+        if (!currentDay) {
+          currentDay = {
+            title: "Current Day",
+            events: []
+          };
+
+          days.push(currentDay);
+        }
+
+        if (isCheckIn(line)) {
+          const time = parseTimeFromLine(line);
+          if (time !== null) {
+            currentDay.events.push({
+              type: "in",
+              time
+            });
+          }
+        }
+
+        if (isCheckOut(line)) {
+          const time = parseTimeFromLine(line);
+          if (time !== null) {
+            currentDay.events.push({
+              type: "out",
+              time
+            });
+          }
         }
       }
 
-      let html = "<h3>Summary</h3>";
-      let total = 0;
-      const pairs = Math.min(checkins.length, checkouts.length);
+      let html = "";
 
-      for (let i = 0; i < pairs; i++) {
-        const duration = checkouts[i] - checkins[i];
-        total += duration;
-        html += `Check-in: ${formatTime(checkins[i])} <br>
-                 Check-out: ${formatTime(checkouts[i])} → <span class='highlight-yellow'>(${formatDuration(duration)})</span><br><br>`;
+      if (days.length === 0) {
+        document.getElementById("output").innerHTML = `
+          <div class="day-card">
+            No valid check-in/check-out entries found.
+          </div>
+        `;
+        return;
       }
 
-      if (checkins.length > checkouts.length) {
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-        const duration = currentMinutes - checkins[checkins.length - 1];
-        html += `🕒 Current session since ${formatTime(checkins[checkins.length - 1])} → 
-                 <span class='highlight-yellow'>(${formatDuration(duration)})</span><br><br>`;
-        total += duration;
-      }
+      days.forEach((day, dayIndex) => {
+        let total = 0;
+        let openCheckIn = null;
+        let sessionIndex = 1;
+        let body = "";
 
-      html += `<hr>`;
-      html += `✅ Total Worked: <span class='highlight-green'>${formatDuration(total)}</span><br>`;
+        for (const event of day.events) {
+          if (event.type === "in") {
+            openCheckIn = event.time;
+          }
 
-      if (total < 480) {
-        const remaining = 480 - total;
-        const endTime = new Date();
-        endTime.setMinutes(endTime.getMinutes() + remaining);
-        const reach8h = `${endTime.getHours().toString().padStart(2, "0")}:${endTime
-          .getMinutes()
-          .toString()
-          .padStart(2, "0")}`;
-        html += `🔴 Remaining: <span class='highlight-red'>${formatDuration(remaining)}</span><br>`;
-        html += `➡️ You’ll reach 8h at: <span class='highlight-yellow'>${reach8h}</span>`;
-      } else {
-        html += `🎉 You’ve completed your 8h target!`;
-      }
+          if (event.type === "out" && openCheckIn !== null) {
+            const duration = event.time - openCheckIn;
+            total += duration;
+
+            body += `
+              <div class="session">
+                Session ${sessionIndex}: 
+                ${formatTime(openCheckIn)} → ${formatTime(event.time)}
+                = <span class="highlight-yellow">${formatDuration(duration)}</span>
+              </div>
+            `;
+
+            sessionIndex++;
+            openCheckIn = null;
+          }
+        }
+
+        const isLastDay = dayIndex === days.length - 1;
+
+        if (openCheckIn !== null) {
+          if (isLastDay) {
+            const now = nowInMinutes();
+            const duration = now - openCheckIn;
+            total += duration;
+
+            body += `
+              <div class="session">
+                🕒 Current session:
+                ${formatTime(openCheckIn)} → Now (${formatTime(now)})
+                = <span class="highlight-yellow">${formatDuration(duration)}</span>
+              </div>
+            `;
+          } else {
+            body += `
+              <div class="session highlight-red">
+                ⚠️ Missing check-out after ${formatTime(openCheckIn)}
+              </div>
+            `;
+          }
+        }
+
+        const remaining = TARGET_MINUTES - total;
+
+        html += `
+          <div class="day-card">
+            <div class="day-title">📅 ${day.title}</div>
+
+            ${body || `<div class="muted">No valid sessions found.</div>`}
+
+            <hr>
+
+            ✅ Total Worked:
+            <span class="${total >= TARGET_MINUTES ? "highlight-green" : "highlight-red"}">
+              ${formatDuration(total)}
+            </span>
+            <br>
+        `;
+
+        if (total < TARGET_MINUTES) {
+          const reachAt = formatTime(nowInMinutes() + remaining);
+
+          html += `
+            🔴 Remaining:
+            <span class="highlight-red">${formatDuration(remaining)}</span>
+            <br>
+            ➡️ You’ll reach 8h at:
+            <span class="highlight-yellow">${reachAt}</span>
+          `;
+        } else {
+          html += `
+            🎉 <span class="highlight-green">You’ve completed your 8h target!</span>
+          `;
+        }
+
+        html += `</div>`;
+      });
 
       document.getElementById("output").innerHTML = html;
-    }
-
-    function formatTime(mins) {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
     }
   </script>
 </body>
